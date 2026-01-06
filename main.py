@@ -1,5 +1,6 @@
 from PIL import Image
 import numpy as np
+import math
 
 ##USE Left handed coordinates
 
@@ -156,10 +157,20 @@ class Camera(Object3D):
                     continue
                 else:
                     visable_lines.append((int(face[i][j]), int(face[i][(j+1)%3])))
-    
+        #print(len(visable_lines))
         return visable_lines
 
-    def _draw_wireframe(self, vertex_proj, line_visable):
+    def _normalize_projected_vertex(self,v_proj):
+        norm_vertex = []
+        scale_factor_x = self.resolution[0]/math.tan(self.fov[0])
+        scale_factor_y = -scale_factor_x
+        trans_x = self.resolution[0]/2
+        trans_y = self.resolution[1]/2
+        for v in v_proj:
+            norm_vertex.append((int(v[0]*scale_factor_x + trans_x), int(v[1]*scale_factor_y + trans_y)))
+        return norm_vertex
+    
+    def _draw_wireframe(self, norm_vertex, line_visable):
         norm = self.resolution[0]
         img = Image.new('RGB', (self.resolution[0],self.resolution[1]), color='white')
         pixels = img.load()
@@ -167,7 +178,56 @@ class Camera(Object3D):
             for y in range(240):
                 pixels[x, y] = (0, 0, 0) 
         #print(line_visable)
-        for line in line_visable:
+        #print(len(line_visable))
+        for f in range(len(line_visable)):
+            line = line_visable[f]
+            #print(line)
+            dx = norm_vertex[line[1]][0] - norm_vertex[line[0]][0]
+            dy = norm_vertex[line[1]][1] - norm_vertex[line[0]][1]
+            if dx==0 and dy==0:
+                Dx=0
+                Dy=0
+            elif dx==0:
+                Dy=0
+                Dx=100
+            elif dy==0:
+                Dx=0
+                Dy=100
+            else:
+                Dx = dy/dx
+                Dy = dx/dy
+            #print('dxdy')
+            #print([Dx,Dy, dx, dy])
+            if abs(Dx)<=1:
+                for i in range(0,int(dx),int(math.copysign(1,dx))):
+                    #print(int(vertex_proj[line[0]][0]*norm + i))
+                    #try:
+                    pixels[int(norm_vertex[line[0]][0] + i), int(norm_vertex[line[0]][1] + i*Dx)] = (150, 150, 150)
+                    #except IndexError:
+                    #    pass
+                        #print("Invalid index", int(vertex_proj[line[0]][0]*norm + i)+160+1, -int(vertex_proj[line[0]][1]*norm + i*Dx)+120-1)
+            else:
+                for i in range(0,int(dy),int(math.copysign(1,dy))):
+                    #try:
+                    pixels[int(norm_vertex[line[0]][0] + i*Dy), int(norm_vertex[line[0]][1] + i)] = (150, 150, 150)
+                    #except IndexError:
+                    #    pass
+                        #print("Invalid index",int(vertex_proj[line[0]][0]*norm + i*Dy)+160+1, -int(vertex_proj[line[0]][1]*norm + i)+120-1)
+        
+        print(f)
+
+        return img
+    def _draw_wireframe2(self, vertex_proj, line_visable):
+        norm = self.resolution[0]
+        img = Image.new('RGB', (self.resolution[0],self.resolution[1]), color='white')
+        pixels = img.load()
+        for x in range(320):
+            for y in range(240):
+                pixels[x, y] = (0, 0, 0) 
+        #print(line_visable)
+        #print(len(line_visable))
+        for f in range(len(line_visable)):
+            line = line_visable[f]
             #print(line)
             dx = vertex_proj[line[1]][0] - vertex_proj[line[0]][0]
             dy = vertex_proj[line[1]][1] - vertex_proj[line[0]][1]
@@ -184,13 +244,18 @@ class Camera(Object3D):
                     try:
                         pixels[int(vertex_proj[line[0]][0]*norm + i)+160+1, -int(vertex_proj[line[0]][1]*norm + i*Dx)+120-1] = (150, 150, 150)
                     except IndexError:
-                        print("Invalid index", int(vertex_proj[line[0]][0]*norm + i)+160+1, -int(vertex_proj[line[0]][1]*norm + i*Dx)+120-1)
+                        pass
+                        #print("Invalid index", int(vertex_proj[line[0]][0]*norm + i)+160+1, -int(vertex_proj[line[0]][1]*norm + i*Dx)+120-1)
             else:
                 for i in range(int(dy*norm)+1):
                     try:
                         pixels[int(vertex_proj[line[0]][0]*norm + i*Dy)+160+1, -int(vertex_proj[line[0]][1]*norm + i)+120-1] = (150, 150, 150)
                     except IndexError:
-                        print("Invalid index",int(vertex_proj[line[0]][0]*norm + i*Dy)+160+1, -int(vertex_proj[line[0]][1]*norm + i)+120-1)
+                        pass
+                        #print("Invalid index",int(vertex_proj[line[0]][0]*norm + i*Dy)+160+1, -int(vertex_proj[line[0]][1]*norm + i)+120-1)
+        
+        print(f)
+
         return img
 
 
@@ -215,7 +280,9 @@ class Camera(Object3D):
             #print('visable_lines')
             #print(visable_lines)
             #print({i for i in visable_lines})
-            img = self._draw_wireframe(projected_vertex, visable_lines)
+            proj_norm_vertex = self._normalize_projected_vertex(projected_vertex)
+            #print(proj_norm_vertex)
+            img = self._draw_wireframe(proj_norm_vertex, visable_lines)
 
             if out:
                 img.show()
@@ -229,22 +296,23 @@ class Camera(Object3D):
 obj = Object3D()
 cam = Camera()
 
-obj.translate(dx=-0.5, dy= -0.5)
-obj.rotate(rz=90, degrees=True)
+#obj.translate(dx=-0.5, dy= -0.5)
+#obj.rotate(rz=90, degrees=True)
 
 gif = []
 
+#'''
 for i in range(360):
-    obj.rotate(ry=5, degrees=True)
+    obj.rotate(ry=2, rz=1, degrees=True)
     img = cam.snapshot(obj)
     gif.append(img)
-
 gif[0].save(
-    'rotationy.gif',
+    'rotationyz.gif',
     save_all=True,
     append_images=gif[1:],
     duration=1,    # adjust this for speed~ faster = smaller number!
     loop=0
 )
+#'''
 
 #cam.snapshot(obj, out = True)
