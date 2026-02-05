@@ -48,17 +48,81 @@ class Object3D:
             ], dtype=int)
             self.transform_matrix = np.eye(4, dtype=float)
             self.rotation_matrix = np.eye(4, dtype=float)
-            if pos is not None:
-                self.pos = pos
-            else:
-                self.pos = np.array([0.0, 0.0, 0.0, 1])
-            if rot is not None:
-                self.rot = rot
-            else:
-                self.rot = np.array([0.0, 0.0, 0.0])#roll pitch yaw
         else:
-            pass
+            self.__open(filename)
+            self.transform_matrix = np.eye(4, dtype=float)
+            self.rotation_matrix = np.eye(4, dtype=float)
+        if pos is not None:
+            self.pos = pos
+        else:
+                self.pos = np.array([0.0, 0.0, 0.0, 1])
+        if rot is not None:
+            self.rot = rot
+        else:
+            self.rot = np.array([0.0, 0.0, 0.0])#roll pitch yaw
+
         self._update_transform()
+    
+    def __open(self,filename):
+        vertices = []      # v
+        normals = []       # vn
+        texcoords = []     # vt
+        faces = []         # f (triangle only for now)
+
+        with open(filename, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                    
+                parts = line.split()
+                cmd = parts[0]
+
+                if cmd == 'v':
+                    # vertex position
+                    x, y, z = map(float, parts[1:4])
+                    vertices.append((x, y, z, 1))
+
+                elif cmd == 'vn':
+                    # vertex normal
+                    nx, ny, nz = map(float, parts[1:4])
+                    normals.append((nx, ny, nz, 0))
+
+                elif cmd == 'vt':
+                    # texture coordinate
+                    u, v = map(float, parts[1:3])
+                    texcoords.append((u, v))
+
+                elif cmd == 'f':
+                    # face (we support 3 formats: v, v/vt, v/vt/vn)
+                    face = []
+                    for v in parts[1:]:
+                        vals = v.split('/')
+                        # vertex index (always present)
+                        vi = int(vals[0]) - 1
+                        # texture index (optional)
+                        ti = int(vals[1]) - 1 if len(vals) > 1 and vals[1] else -1
+                        # normal index (optional)
+                        ni = int(vals[2]) - 1 if len(vals) > 2 and vals[2] else -1
+                        
+                        face.append((vi, ti, ni))
+                    
+                    # we assume triangles (most common)
+                    if len(face) == 3:
+                        faces.append(face)
+                    # if quad, split into two triangles
+                    elif len(face) == 4:
+                        faces.append([face[0], face[1], face[2]])
+                        faces.append([face[0], face[2], face[3]])
+
+            print(f"Loaded: {len(vertices)} vertices, {len(normals)} normals, {len(texcoords)} texcoords, {len(faces)} faces")
+
+            self.v = np.array(vertices, dtype=float)
+            self.vn = np.array(normals, dtype=float)
+            self.vt = np.array(texcoords, dtype=float)
+            self.f = np.array(faces)
+
+            return
 
     def _update_transform(self):
         """Rebuild the 4x4 transformation matrix from position and rotation"""
@@ -161,6 +225,7 @@ class Camera(Object3D):
         return visable_lines
 
     def _normalize_projected_vertex(self,v_proj):
+        #normalizes projected vertex to screen coordinates
         norm_vertex = []
         scale_factor_x = self.resolution[0]/math.tan(self.fov[0])
         scale_factor_y = -scale_factor_x
@@ -217,7 +282,8 @@ class Camera(Object3D):
         print(f)
 
         return img
-    def _draw_wireframe2(self, vertex_proj, line_visable):
+    
+    def _draw_wireframe_old(self, vertex_proj, line_visable):
         norm = self.resolution[0]
         img = Image.new('RGB', (self.resolution[0],self.resolution[1]), color='white')
         pixels = img.load()
@@ -291,17 +357,97 @@ class Camera(Object3D):
 
         elif obj is list:
             pass
+    
+    def rasterize(self, v, vn, lp, ld, f, vt, vp):
+        depth_buffer = np.zeros((self.resolution[0], self.resolution[1]))
+        print(v.shape)
+        for face in f:
+            v_face = np.array([v[:,vi[0]] for vi in face])
+            vt_face = np.array([vt[vti[1]] for vti in face])
+            vn_face = np.array([vn[:,vni[2]] for vni in face])
+            vp_face = np.array([vp[vpi[0]] for vpi in face])
+
+            vc_face = self.blinn_phong(v_face,vn_face,lp,ld)
+
+            box = [(min([x[0] for x in vp_face]), min([y[1] for y in vp_face])),
+                   (max([x[0] for x in vp_face]), max([y[1] for y in vp_face]))]
+            for x in range(box[0][0],box[1][0]):
+                for y in range(box[0][1],box[1][1]):
+                    pass
+            print(1)
+
+    def blinn_phong(self, v,vn,lp,ld):
+        Ka = 0.3
+        Ia = 1
+        Kd = 0.3
+        Id = 1
+        Ks = 0.3
+        Is = 1
+        alpha = 2
+
+        print(lp.shape, v.shape, vn.shape)
+
+        L = (lp[:,np.newaxis]-v)
+        L_size = np.sqrt(np.sum(L**2))
+        V=v
+        N=vn
+        V_size = np.sqrt(np.sum(V**2))
+        D=L_size
+        D_sq = np.sum(L**2)
+        N_size_L_size = 1*L_size
+        R = 2*np.dot(N,L)*N-L
+        N_L=np.dot(N,L)
+        R_V=np.dot(R,V)
+        D2NSLS=D_sq*N_size_L_size
+        RVa=R_V**alpha
+        RSVS= L_size*V_size
+        D2RSVS=D_sq*RSVS
+        
+        Ambient = Ka*Ia/D_sq
+        Diffuse = Kd*Id*N_L/D2NSLS
+        Specualr = Ks*Is*RVa/D2RSVS
+
+        Light = Ambient+Diffuse+Specualr
+
+        return Light
+
+
+    def snapshot2(self, obj, light,out = False):
+        mtw = obj.get_model_to_world_matrix()
+        wtv = self.get_world_to_view_matrix()
+        mtv = np.matmul(wtv,mtw)
+
+        vertex_pos_view = np.matmul(mtv,obj.v.transpose())
+        vertex_normal_view =  np.matmul(mtv,obj.vn.transpose())
+        light_dir_view = np.matmul(wtv,light.rot)
+        light_pos_view = np.matmul(wtv,light.pos)
+        vertex_proj = self._project(vertex_pos_view.transpose())
+        vp2 = self._normalize_projected_vertex(vertex_proj)
+        self.rasterize(vertex_pos_view,vertex_normal_view,
+                        light_dir_view,light_pos_view, obj.f, obj.vt, vp2)
+        #vertex_light = self.blinn_phong(vertex_pos_view,vertex_normal_view,
+        #                                light_dir_view,light_pos_view)
+        #print(vertex_light[0:30])
+
+
+class Light(Object3D):
+    def __init__(self, pos = [0,0,0], direction = [0,0,1], luminance = [255,255,255]):
+        super().__init__(pos = np.array([pos[0],pos[1],pos[2],1]),
+                         rot=np.array([direction[0],direction[1],direction[2],0]))
+        self.p = pos
+        self.d = direction
+        self.l = luminance
         
 
-obj = Object3D()
+obj = Object3D(filename='asset ignore git\\catv2.obj')
 cam = Camera()
-
+Laight = Light(pos = [0,0,100], direction=[0,0,-1], luminance=[255,255,255])
 #obj.translate(dx=-0.5, dy= -0.5)
 #obj.rotate(rz=90, degrees=True)
 
 gif = []
-
-#'''
+cam.snapshot2(obj,Laight)
+'''
 for i in range(360):
     obj.rotate(ry=2, rz=1, degrees=True)
     img = cam.snapshot(obj)
@@ -313,6 +459,6 @@ gif[0].save(
     duration=1,    # adjust this for speed~ faster = smaller number!
     loop=0
 )
-#'''
+'''
 
 #cam.snapshot(obj, out = True)
